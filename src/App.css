@@ -464,6 +464,56 @@
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
+.btn--secondary {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-h);
+  margin-top: 0.5rem;
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.summary-card--confirmed {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.badge--success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.confirmed-icon {
+  font-size: 1.25rem;
+}
+
+.text-success {
+  color: #059669;
+}
+
+.card-description {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.booking-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.value-mono {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
 .confirmation-badge {
   text-align: center;
   font-size: 0.875rem;

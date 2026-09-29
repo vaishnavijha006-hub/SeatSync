@@ -17,9 +17,18 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [isHolding, setIsHolding] = useState(false)
   const [isConfirming, setIsConfirming] = useState(false)
-  const [bookingConfirmed, setBookingConfirmed] = useState(false)
+  const [confirmedBooking, setConfirmedBooking] = useState(null)
   const [errorMessage, setErrorMessage] = useState(null)
   const [successMessage, setSuccessMessage] = useState(null)
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
+
+  // Ticker to normalize expired holds across all users every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Fetch all seats for the active event
   const fetchSeats = useCallback(async () => {
@@ -144,15 +153,33 @@ function App() {
   // Subscribe to public.seats via realtime
   useSeatsRealtime(EVENT_ID, handleRealtimeSeatChange)
 
-  // Current user's held seats
+  // Normalize seats: if a held seat's locked_until is expired, display it as available
+  const normalizedSeats = useMemo(() => {
+    return seats.map((seat) => {
+      if (seat.status === 'held' && seat.locked_until) {
+        const isExpired = new Date(seat.locked_until).getTime() <= currentTime
+        if (isExpired) {
+          return {
+            ...seat,
+            status: 'available',
+            locked_by: null,
+            locked_until: null,
+          }
+        }
+      }
+      return seat
+    })
+  }, [seats, currentTime])
+
+  // Current user's held seats (using normalized seats)
   const userHeldSeats = useMemo(() => {
     if (!user) return []
-    return seats.filter(
+    return normalizedSeats.filter(
       (s) => s.status === 'held' && s.locked_by === user.id
     )
-  }, [seats, user])
+  }, [normalizedSeats, user])
 
-  // Locate the latest active hold expiry timestamp for user
+  // Locate the latest active hold expiry timestamp for current user
   const latestLockedUntil = useMemo(() => {
     if (userHeldSeats.length === 0) return null
     const timestamps = userHeldSeats
@@ -166,7 +193,6 @@ function App() {
   const handleTimerExpire = useCallback(() => {
     setErrorMessage('Your seat hold has expired. Please select seats again.')
     setSuccessMessage(null)
-    setBookingConfirmed(false)
     fetchSeats()
   }, [fetchSeats])
 
@@ -179,7 +205,6 @@ function App() {
   // Toggle local selection of an available seat
   const handleToggleSeat = useCallback((seat) => {
     setErrorMessage(null)
-    setSuccessMessage(null)
 
     setSelectedSeatIds((prev) => {
       const next = new Set(prev)
@@ -226,21 +251,59 @@ function App() {
     }
   }, [selectedSeatIds, fetchSeats])
 
-  // Handle booking confirmation (payment in next phase)
-  const handleConfirmBooking = useCallback(() => {
+  // Atomic confirm_booking RPC
+  const handleConfirmBooking = useCallback(async () => {
+    if (userHeldSeats.length === 0) return
+
     setIsConfirming(true)
     setErrorMessage(null)
-    setTimeout(() => {
-      setIsConfirming(false)
-      setBookingConfirmed(true)
-      setSuccessMessage('Booking confirmed! Payment gateway integration will follow in next phase.')
-    }, 400)
+    setSuccessMessage(null)
+
+    const heldSeatIds = userHeldSeats.map((s) => s.id)
+    const heldSeatLabels = userHeldSeats
+      .map((s) => `${s.row_label}${s.seat_number}`)
+      .sort()
+
+    const { data, error } = await supabase.rpc('confirm_booking', {
+      p_event_id: EVENT_ID,
+      p_seat_ids: heldSeatIds,
+    })
+
+    setIsConfirming(false)
+
+    if (error) {
+      console.error('Confirm booking RPC error:', error)
+      setErrorMessage(`Booking failed: ${error.message}`)
+      await fetchSeats()
+      return
+    }
+
+    if (data?.success) {
+      setConfirmedBooking({
+        bookingId: data.booking_id,
+        totalAmount: data.total_amount,
+        seatCount: data.seat_count,
+        seats: heldSeatLabels,
+      })
+      setSuccessMessage('🎉 Booking confirmed successfully!')
+      setSelectedSeatIds(new Set())
+      await fetchSeats()
+    } else {
+      setErrorMessage(data?.message || 'Booking confirmation failed.')
+      await fetchSeats()
+    }
+  }, [userHeldSeats, fetchSeats])
+
+  // Dismiss confirmation banner / book more
+  const handleDismissConfirmation = useCallback(() => {
+    setConfirmedBooking(null)
+    setSuccessMessage(null)
   }, [])
 
   // List of locally selected seat objects
   const selectedSeatObjects = useMemo(() => {
-    return seats.filter((s) => selectedSeatIds.has(s.id))
-  }, [seats, selectedSeatIds])
+    return normalizedSeats.filter((s) => selectedSeatIds.has(s.id))
+  }, [normalizedSeats, selectedSeatIds])
 
   return (
     <div className="app-container">
@@ -292,7 +355,7 @@ function App() {
         <main className="booking-layout">
           <section className="auditorium-section">
             <SeatMap
-              seats={seats}
+              seats={normalizedSeats}
               currentUserId={user?.id}
               selectedSeatIds={selectedSeatIds}
               onToggleSeat={handleToggleSeat}
@@ -311,7 +374,8 @@ function App() {
               isTimerExpired={isTimerExpired}
               onConfirmBooking={handleConfirmBooking}
               isConfirming={isConfirming}
-              bookingConfirmed={bookingConfirmed}
+              confirmedBooking={confirmedBooking}
+              onDismissConfirmation={handleDismissConfirmation}
               errorMessage={errorMessage}
               successMessage={successMessage}
             />
