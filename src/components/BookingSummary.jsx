@@ -1,8 +1,10 @@
 /**
- * BookingSummary renders the selection checkout panel, price calculation,
- * hold actions, hold timer, and booking confirmation flow.
+ * BookingSummary renders the selection summary, checkout & simulated payment panel,
+ * hold countdown timer, and booking confirmation details.
  */
 export function BookingSummary({
+  eventName = 'Live Event',
+  showInfo = null,
   selectedSeats = [],
   userHeldSeats = [],
   pricePerSeat = 200,
@@ -11,10 +13,15 @@ export function BookingSummary({
   timerFormatted = '00:00',
   isTimerActive = false,
   isTimerExpired = false,
-  onConfirmBooking,
-  isConfirming = false,
+  onPaySuccess,
+  onPayFailure,
+  onCancelPayment,
+  isPaymentProcessing = false,
+  paymentStatus = 'idle',
+  onResetPayment,
   confirmedBooking = null,
   onDismissConfirmation,
+  onViewBookings,
   errorMessage = null,
   successMessage = null,
 }) {
@@ -28,7 +35,7 @@ export function BookingSummary({
 
   return (
     <aside className="booking-summary">
-      <h2 className="summary-title">Booking Summary</h2>
+      <h2 className="summary-title">Booking & Checkout</h2>
 
       {errorMessage && (
         <div className="alert alert--error" role="alert">
@@ -52,14 +59,35 @@ export function BookingSummary({
 
           <h3 className="card-title text-success">Booking Confirmed!</h3>
           <p className="card-description">
-            Your seats have been successfully reserved and booked.
+            Payment successful and your seats are booked.
           </p>
 
           <div className="booking-details">
             <div className="summary-row">
+              <span className="label">Event:</span>
+              <span className="value">{confirmedBooking.eventName || eventName}</span>
+            </div>
+
+            {(confirmedBooking.showInfo || showInfo) && (
+              <div className="summary-row">
+                <span className="label">Show:</span>
+                <span className="value">
+                  {(confirmedBooking.showInfo || showInfo).date} • {(confirmedBooking.showInfo || showInfo).time}
+                </span>
+              </div>
+            )}
+
+            <div className="summary-row">
+              <span className="label">Payment Status:</span>
+              <span className="value text-success font-semibold">
+                {confirmedBooking.paymentStatus || 'Successful'}
+              </span>
+            </div>
+
+            <div className="summary-row">
               <span className="label">Booking ID:</span>
               <span className="value value-mono" title={confirmedBooking.bookingId}>
-                {confirmedBooking.bookingId.slice(0, 13)}...
+                {confirmedBooking.bookingId ? `${confirmedBooking.bookingId.slice(0, 13)}...` : 'N/A'}
               </span>
             </div>
 
@@ -73,7 +101,7 @@ export function BookingSummary({
             </div>
 
             <div className="summary-row">
-              <span className="label">Seat Count:</span>
+              <span className="label">Number of Seats:</span>
               <span className="value">{confirmedBooking.seatCount}</span>
             </div>
 
@@ -85,26 +113,39 @@ export function BookingSummary({
             </div>
           </div>
 
-          {onDismissConfirmation && (
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={onDismissConfirmation}
-            >
-              Book More Seats
-            </button>
-          )}
+          <div className="confirmed-action-group">
+            {onViewBookings && (
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={onViewBookings}
+              >
+                View in My Bookings
+              </button>
+            )}
+            {onDismissConfirmation && (
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={onDismissConfirmation}
+              >
+                Book More Seats
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ACTIVE HELD SEATS SECTION */}
-      {hasHeldSeats && (
-        <div className="summary-card summary-card--held">
+      {/* SIMULATED PAYMENT & CHECKOUT CARD */}
+      {!confirmedBooking && hasHeldSeats && (
+        <div className="summary-card summary-card--payment" role="region" aria-label="Simulated Payment">
           <div className="card-header">
-            <span className="badge badge--held">Seats on Hold</span>
+            <span className="badge badge--held">Checkout & Payment</span>
             {isTimerActive && (
-              <span className="hold-timer" aria-live="polite">
-                ⏱ {timerFormatted}
+              <span className="hold-timer" role="timer" aria-live="off" aria-label={`Hold expires in ${timerFormatted}`}>
+                <span aria-hidden="true">◷</span>
+                <span>Hold</span>
+                <strong>{timerFormatted}</strong>
               </span>
             )}
             {isTimerExpired && (
@@ -112,79 +153,172 @@ export function BookingSummary({
             )}
           </div>
 
-          <div className="summary-row">
-            <span className="label">Held Seats:</span>
-            <span className="value">
-              {userHeldSeats
-                .map((s) => `${s.row_label}${s.seat_number}`)
-                .sort()
-                .join(', ')}
-            </span>
+          <div className="payment-event-name">{eventName}</div>
+          {showInfo && (
+            <div className="payment-show-meta">
+              <span>🗓 {showInfo.date}</span>
+              <span>⏰ {showInfo.time}</span>
+              <span>📍 {showInfo.venue}</span>
+            </div>
+          )}
+
+          <div className="payment-details">
+            <div className="summary-row">
+              <span className="label">Seats:</span>
+              <span className="value">
+                {userHeldSeats
+                  .map((s) => `${s.row_label}${s.seat_number}`)
+                  .sort()
+                  .join(', ')}
+              </span>
+            </div>
+
+            <div className="summary-row">
+              <span className="label">Price:</span>
+              <span className="value">₹{pricePerSeat} × {heldCount}</span>
+            </div>
+
+            <div className="summary-row">
+              <span className="label">Number of seats:</span>
+              <span className="value">{heldCount}</span>
+            </div>
+
+            <div className="summary-row summary-row--total">
+              <span className="label">Total Amount:</span>
+              <span className="value-total">₹{heldTotal.toLocaleString('en-IN')}</span>
+            </div>
           </div>
 
-          <div className="summary-row">
-            <span className="label">Held Count:</span>
-            <span className="value">{heldCount}</span>
+          {/* Payment Action Buttons */}
+          <div className="payment-actions">
+            <button
+              type="button"
+              className="btn btn--pay"
+              onClick={onPaySuccess}
+              disabled={isPaymentProcessing || isTimerExpired || !hasHeldSeats}
+            >
+              {isPaymentProcessing ? (
+                <span className="btn-loading">
+                  <span className="spinner-inline" /> Processing Payment...
+                </span>
+              ) : (
+                `Pay ₹${heldTotal.toLocaleString('en-IN')}`
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="btn btn--pay-fail"
+              onClick={onPayFailure}
+              disabled={isPaymentProcessing || isTimerExpired || !hasHeldSeats}
+            >
+              Simulate Payment Failure
+            </button>
+
+            <button
+              type="button"
+              className="btn btn--pay-cancel"
+              onClick={onCancelPayment}
+              disabled={isPaymentProcessing || !hasHeldSeats}
+            >
+              Cancel Payment
+            </button>
           </div>
 
-          <div className="summary-row summary-row--total">
-            <span className="label">Total Amount:</span>
-            <span className="value-total">₹{heldTotal.toLocaleString('en-IN')}</span>
+          <div className="price-note">
+            <small>⚠️ Simulated payment for testing. No real card charged.</small>
           </div>
+        </div>
+      )}
 
+      {/* PAYMENT STATUS FEEDBACK (FAILED / CANCELLED / EXPIRED) */}
+      {!confirmedBooking && !hasHeldSeats && (paymentStatus === 'failed' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && (
+        <div className="summary-card summary-card--status-notice">
+          {paymentStatus === 'failed' && (
+            <>
+              <h4 className="notice-title text-danger">Payment Failed</h4>
+              <p className="notice-desc">Your seats have been released and are now available.</p>
+            </>
+          )}
+          {paymentStatus === 'cancelled' && (
+            <>
+              <h4 className="notice-title text-muted">Payment Cancelled</h4>
+              <p className="notice-desc">Your seats have been released and returned to available.</p>
+            </>
+          )}
+          {paymentStatus === 'expired' && (
+            <>
+              <h4 className="notice-title text-warning">Hold Expired</h4>
+              <p className="notice-desc">Your 5-minute hold window expired. Please select seats again.</p>
+            </>
+          )}
           <button
             type="button"
-            className="btn btn--confirm"
-            onClick={onConfirmBooking}
-            disabled={isConfirming || isTimerExpired || !hasHeldSeats}
+            className="btn btn--secondary"
+            onClick={onResetPayment}
           >
-            {isConfirming ? 'Confirming Booking...' : 'Confirm Booking'}
+            Back to Seats
           </button>
         </div>
       )}
 
       {/* LOCALLY SELECTED SEATS SECTION */}
-      <div className="summary-card">
-        <h3 className="card-title">New Selection</h3>
+      {!confirmedBooking && (
+        <div className="summary-card">
+          <h3 className="card-title">New Selection</h3>
 
-        <div className="summary-row">
-          <span className="label">Selected Seats:</span>
-          <span className="value">
-            {hasSelection
-              ? selectedSeats
-                  .map((s) => `${s.row_label}${s.seat_number}`)
-                  .sort()
-                  .join(', ')
-              : 'None'}
-          </span>
+          {showInfo && (
+            <div className="summary-row">
+              <span className="label">Show:</span>
+              <span className="value">{showInfo.date} • {showInfo.time}</span>
+            </div>
+          )}
+
+          <div className="summary-row">
+            <span className="label">Selected Seats:</span>
+            <span className="value">
+              {hasSelection
+                ? selectedSeats
+                    .map((s) => `${s.row_label}${s.seat_number}`)
+                    .sort()
+                    .join(', ')
+                : 'None'}
+            </span>
+          </div>
+
+          <div className="summary-row">
+            <span className="label">Seat Count:</span>
+            <span className="value">{selectedCount}</span>
+          </div>
+
+          <div className="summary-row">
+            <span className="label">Price per seat:</span>
+            <span className="value">₹{pricePerSeat}</span>
+          </div>
+
+          <div className="summary-row summary-row--total">
+            <span className="label">Subtotal:</span>
+            <span className="value-total">₹{selectedTotal.toLocaleString('en-IN')}</span>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn--hold"
+            onClick={onHoldSeats}
+            disabled={!hasSelection || isHolding || hasHeldSeats}
+          >
+            {isHolding
+              ? 'Holding Seats...'
+              : `Hold ${selectedCount > 0 ? `${selectedCount} ` : ''}Seat${selectedCount !== 1 ? 's' : ''}`}
+          </button>
+
+          {hasHeldSeats && hasSelection && (
+            <p className="selection-warning">
+              <small>Please complete or cancel your active checkout before holding new seats.</small>
+            </p>
+          )}
         </div>
-
-        <div className="summary-row">
-          <span className="label">Seat Count:</span>
-          <span className="value">{selectedCount}</span>
-        </div>
-
-        <div className="summary-row">
-          <span className="label">Price per seat:</span>
-          <span className="value">₹{pricePerSeat}</span>
-        </div>
-
-        <div className="summary-row summary-row--total">
-          <span className="label">Subtotal:</span>
-          <span className="value-total">₹{selectedTotal.toLocaleString('en-IN')}</span>
-        </div>
-
-        <button
-          type="button"
-          className="btn btn--hold"
-          onClick={onHoldSeats}
-          disabled={!hasSelection || isHolding}
-        >
-          {isHolding
-            ? 'Holding Seats...'
-            : `Hold ${selectedCount > 0 ? `${selectedCount} ` : ''}Seat${selectedCount !== 1 ? 's' : ''}`}
-        </button>
-      </div>
+      )}
 
       <div className="price-note">
         <small>⚡ Seats are held for 5 minutes once reserved.</small>

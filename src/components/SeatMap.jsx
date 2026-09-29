@@ -31,7 +31,7 @@ export function SeatMap({
         <span className="screen-label">STAGE / SCREEN</span>
       </div>
 
-      <div className="seat-grid">
+      <div className="seat-grid" role="group" aria-label="Choose available seats">
         {sortedRowLabels.map((rowLabel) => (
           <div key={rowLabel} className="seat-row">
             <span className="row-indicator">{rowLabel}</span>

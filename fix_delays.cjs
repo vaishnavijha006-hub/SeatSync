@@ -1,0 +1,1 @@
+const fs=require('fs');let s=fs.readFileSync('C:/Users/vaish/SeatSync/phase9_cjs.cjs','utf8');s=s.split('signInAnon(3000)').join('signInAnon(12000)');fs.writeFileSync('C:/Users/vaish/SeatSync/phase9_cjs.cjs',s,'utf8');console.log('Done');

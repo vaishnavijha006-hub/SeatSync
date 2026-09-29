@@ -51,6 +51,7 @@ export function Seat({
       className={`seat seat--${state}`}
       onClick={handleClick}
       disabled={!isClickable}
+      aria-pressed={isClickable ? isLocallySelected : undefined}
       aria-label={`Seat ${seat.row_label}${seat.seat_number}, ${getStatusLabel()}`}
       title={`Seat ${seat.row_label}${seat.seat_number} - ${getStatusLabel()}`}
     >
