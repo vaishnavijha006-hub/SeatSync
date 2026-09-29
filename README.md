@@ -1,5 +1,5 @@
 # SeatSync
-
+Live URL = https://seat-sync.netlify.app/
 SeatSync is a realtime, high-concurrency seat reservation and booking system built with React, Vite, and Supabase.
 
 ## Booking Architecture & Show-Based Inventory
