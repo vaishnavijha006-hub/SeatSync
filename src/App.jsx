@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { supabase } from './lib/supabase'
 import SeatMap from './components/SeatMap'
 import BookingSummary from './components/BookingSummary'
+import AuthPage from './components/AuthPage'
 import { useSeatsRealtime } from './hooks/useSeatsRealtime'
 import { useHoldTimer } from './hooks/useHoldTimer'
 import './App.css'
@@ -11,10 +12,11 @@ const PRICE_PER_SEAT = 200
 
 function App() {
   const [user, setUser] = useState(null)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [event, setEvent] = useState(null)
   const [seats, setSeats] = useState([])
   const [selectedSeatIds, setSelectedSeatIds] = useState(() => new Set())
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [isHolding, setIsHolding] = useState(false)
   const [isConfirming, setIsConfirming] = useState(false)
   const [confirmedBooking, setConfirmedBooking] = useState(null)
@@ -65,48 +67,52 @@ function App() {
     setEvent(data)
   }, [])
 
-  // Initialize or restore anonymous session
-  const initAuth = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-
-    if (session?.user) {
-      setUser(session.user)
-      return session.user
-    }
-
-    const { data, error } = await supabase.auth.signInAnonymously()
-    if (error) {
-      console.error('Auth error:', error)
-      setErrorMessage(`Authentication error: ${error.message}`)
-      return null
-    }
-
-    setUser(data?.user || null)
-    return data?.user || null
-  }, [])
-
-  // Initial load
+  // Initial session check on mount (does NOT create an anonymous session automatically)
   useEffect(() => {
     let isMounted = true
 
-    async function initialize() {
-      setIsLoading(true)
-      await initAuth()
-      await Promise.all([fetchEvent(), fetchSeats()])
+    async function checkSession() {
+      setIsCheckingAuth(true)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (session?.user) {
+        if (isMounted) {
+          setUser(session.user)
+          await Promise.all([fetchEvent(), fetchSeats()])
+        }
+      } else {
+        if (isMounted) {
+          setUser(null)
+        }
+      }
+
       if (isMounted) {
-        setIsLoading(false)
+        setIsCheckingAuth(false)
       }
     }
 
-    initialize()
+    checkSession()
 
+    // Subscribe to auth state changes (login, signup, logout)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isMounted) {
-        setUser(session?.user || null)
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!isMounted) return
+
+      const currentUser = session?.user || null
+      setUser(currentUser)
+
+      if (currentUser) {
+        await Promise.all([fetchEvent(), fetchSeats()])
+      } else {
+        // Clear application state on logout
+        setSeats([])
+        setSelectedSeatIds(new Set())
+        setConfirmedBooking(null)
+        setErrorMessage(null)
+        setSuccessMessage(null)
       }
     })
 
@@ -114,7 +120,7 @@ function App() {
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [initAuth, fetchEvent, fetchSeats])
+  }, [fetchEvent, fetchSeats])
 
   // Handle Realtime seat changes from Supabase
   const handleRealtimeSeatChange = useCallback((payload) => {
@@ -150,8 +156,8 @@ function App() {
     }
   }, [])
 
-  // Subscribe to public.seats via realtime
-  useSeatsRealtime(EVENT_ID, handleRealtimeSeatChange)
+  // Subscribe to public.seats via realtime when authenticated
+  useSeatsRealtime(user ? EVENT_ID : null, handleRealtimeSeatChange)
 
   // Normalize seats: if a held seat's locked_until is expired, display it as available
   const normalizedSeats = useMemo(() => {
@@ -300,10 +306,56 @@ function App() {
     setSuccessMessage(null)
   }, [])
 
+  // Logout handler
+  const handleLogout = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      await supabase.auth.signOut()
+    } catch (err) {
+      console.error('Sign out error:', err)
+    } finally {
+      setUser(null)
+      setSeats([])
+      setSelectedSeatIds(new Set())
+      setConfirmedBooking(null)
+      setIsLoading(false)
+    }
+  }, [])
+
+  // Callback when AuthPage successfully authenticates
+  const handleAuthSuccess = useCallback(async (authenticatedUser) => {
+    setUser(authenticatedUser)
+    setIsLoading(true)
+    await Promise.all([fetchEvent(), fetchSeats()])
+    setIsLoading(false)
+  }, [fetchEvent, fetchSeats])
+
   // List of locally selected seat objects
   const selectedSeatObjects = useMemo(() => {
     return normalizedSeats.filter((s) => selectedSeatIds.has(s.id))
   }, [normalizedSeats, selectedSeatIds])
+
+  // User display name: 'Guest' for anonymous users, email otherwise
+  const userDisplayName = useMemo(() => {
+    if (!user) return ''
+    if (user.is_anonymous || !user.email) return 'Guest'
+    return user.email
+  }, [user])
+
+  // Initial session loading state
+  if (isCheckingAuth) {
+    return (
+      <div className="auth-loading-screen">
+        <div className="spinner" />
+        <p>Checking authentication...</p>
+      </div>
+    )
+  }
+
+  // If no active session, show AuthPage
+  if (!user) {
+    return <AuthPage onAuthSuccess={handleAuthSuccess} />
+  }
 
   return (
     <div className="app-container">
@@ -316,12 +368,20 @@ function App() {
           </div>
         </div>
 
-        {user && (
-          <div className="user-badge" title={user.id}>
+        <div className="user-menu">
+          <div className="user-badge" title={`User ID: ${user.id}`}>
             <span className="user-status-dot" />
-            <span className="user-id">Session: {user.id.slice(0, 8)}...</span>
+            <span className="user-id">{userDisplayName}</span>
           </div>
-        )}
+          <button
+            type="button"
+            className="btn-logout"
+            onClick={handleLogout}
+            title="Sign out"
+          >
+            Log Out
+          </button>
+        </div>
       </header>
 
       {event && (
@@ -349,7 +409,7 @@ function App() {
       {isLoading ? (
         <div className="loading-state">
           <div className="spinner" />
-          <p>Connecting to SeatSync & loading auditorium...</p>
+          <p>Loading auditorium and seat availability...</p>
         </div>
       ) : (
         <main className="booking-layout">
